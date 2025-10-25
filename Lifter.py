@@ -4,22 +4,12 @@ from Cubo import Cubo
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
+import csv
 
-filas = 19
-columnas = 19
-PATH = []
-for i in range(filas):
-    inicio = i * columnas
-    fin = inicio + columnas
+with open('data.csv', mode='w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(['Agent', 'State', 'Starting Node', 'Ending Node'])
 
-    if i % 2 == 0:
-        # fila par: izquierda → derecha
-        PATH.extend(list(range(inicio, fin)))
-    else:
-        # fila impar: derecha → izquierda
-        PATH.extend(list(range(fin - 1, inicio - 1, -1)))
-
-ORIGIN = numpy.array([0, 0, 0], dtype=numpy.float64)
 NodosVisita = numpy.array([
     [-180, 0, -180], [-160, 0, -180], [-140, 0, -180], [-120, 0, -180], [-100, 0, -180], [-80, 0, -180], [-60, 0, -180], [-40, 0, -180], [-20, 0, -180], [0, 0, -180], [20, 0, -180], [40, 0, -180], [60, 0, -180], [80, 0, -180], [100, 0, -180], [120, 0, -180], [140, 0, -180], [160, 0, -180], [180, 0, -180],
     [-180, 0, -160], [-160, 0, -160], [-140, 0, -160], [-120, 0, -160], [-100, 0, -160], [-80, 0, -160], [-60, 0, -160], [-40, 0, -160], [-20, 0, -160], [0, 0, -160], [20, 0, -160], [40, 0, -160], [60, 0, -160], [80, 0, -160], [100, 0, -160], [120, 0, -160], [140, 0, -160], [160, 0, -160], [180, 0, -160],
@@ -43,10 +33,11 @@ NodosVisita = numpy.array([
 ], dtype=numpy.float64)
 
 class Lifter:
-    def __init__(self, dim, vel, textures, idx, position, currentNode):
+    def __init__(self, dim, vel, textures, idx, position, currentNode, tipo_exploracion, path):
         # Limites del mapa y ID del robot
         self.dim = dim
         self.idx = idx
+        self.tipo_exploracion = tipo_exploracion
         # Se inicializa la posicion
         self.Position = numpy.array(position, dtype=numpy.float64).flatten()
 
@@ -70,26 +61,33 @@ class Lifter:
         self.trashID = -1
 
         # Inicializar nodos
-        self.currentNodePosition = ORIGIN
+        self.PATH = path
         self.nextNodePosition = self.getNodePath()
+        # Inicializar currentNodePosition para que no rompa en Aleatorio
+        if tipo_exploracion == "Aleatorio":
+            self.currentNodePosition = numpy.array(position, dtype=numpy.float64).copy()
+        else:
+            self.currentNodePosition = self.nextNodePosition.copy() if self.nextNodePosition is not None else numpy.array(position, dtype=numpy.float64).copy()
 
+        
+        
     # ----------------------
     # Métodos de movimiento
     # ----------------------
     def getNodePath(self):
-        global PATH
-        if PATH:
-			# Tomamos el primer nodo del PATH
-            node_idx = PATH.pop(0)
-            return NodosVisita[node_idx].copy()
-        else:
-			# Crear lista de índices posibles, excluyendo el nodo actual
+        if self.tipo_exploracion == "Planeado":
+            if self.PATH:  # Evitar errores si PATH está vacío
+                node_idx = self.PATH.pop(0)
+                return NodosVisita[node_idx].copy()
+            else:
+                return self.Position.copy()  # No moverse si no hay nodos
+        elif self.tipo_exploracion == "Aleatorio":
             possible_nodes = list(range(len(NodosVisita)))
             if hasattr(self, 'currentNode'):
                 possible_nodes.remove(self.currentNode)
-			#Elegir un índice aleatorio de NodosVisita
             node_idx = random.choice(possible_nodes)
             return NodosVisita[node_idx].copy()
+
 
     def getDirectionToNode(self, targetPos):
         dir_vector = targetPos - self.Position
@@ -150,6 +148,12 @@ class Lifter:
 			self.nextNodePosition[2]
 		)
         print(mssg)
+        with open('data.csv', mode='a', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow([self.idx, self.status,
+                            f"[{self.currentNodePosition[0]:.0f},0,{self.currentNodePosition[2]:.0f}]",
+                            f"[{self.nextNodePosition[0]:.0f},0,{self.nextNodePosition[2]:.0f}]"])
+
 
         match self.status:
             case "lifting":

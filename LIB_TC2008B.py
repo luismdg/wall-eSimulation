@@ -2,7 +2,6 @@ import yaml, pygame, random, glob, math, numpy
 from Lifter import Lifter
 from Basura import Basura
 
-
 from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
@@ -12,6 +11,61 @@ textures = [];
 lifters = [];
 basuras = [];
 delta = 0;
+
+def generarPath(filas=19, columnas=19, tipo_exploracion="Aleatorio", num_lifters=1):
+    """
+    Genera los PATH(s) para los lifters dependiendo del tipo de exploración.
+    Si hay 2 lifters en modo 'Planeado', devuelve [PATH_1, PATH_2].
+    """
+    if tipo_exploracion == "Planeado" and num_lifters == 1:
+        path = []
+        # Recorrido tipo serpiente
+        for i in range(filas):
+            inicio = i * columnas
+            fin = inicio + columnas
+
+            if i % 2 == 0:
+                path.extend(list(range(inicio, fin)))
+            else:
+                path.extend(list(range(fin - 1, inicio - 1, -1)))
+        return path
+
+    elif tipo_exploracion == "Planeado" and num_lifters == 2:
+        path1 = []
+        path2 = []
+        mitad = columnas // 2
+
+        # Agente 1: derecha del tablero
+        for i in range(filas):
+            if i % 2 == 0:
+                # Fila par: izquierda → derecha (solo derecha)
+                for j in range(mitad, columnas):
+                    path1.append((j, 0, i))
+            else:
+                # Fila impar: derecha → izquierda (solo derecha)
+                for j in range(columnas - 1, mitad - 1, -1):
+                    path1.append((j, 0, i))
+
+        # Agente 2: izquierda del tablero
+        for i in range(filas):
+            if i % 2 == 0:
+                # Fila par: izquierda → derecha (solo izquierda)
+                for j in range(0, mitad):
+                    path2.append((j, 0, i))
+            else:
+                # Fila impar: derecha → izquierda (solo izquierda)
+                for j in range(mitad - 1, -1, -1):
+                    path2.append((j, 0, i))
+
+        return [path1, path2]
+
+    elif tipo_exploracion == "Aleatorio":
+        return list(range(filas * columnas))
+
+    else:
+        raise ValueError(f"Tipo de exploración '{tipo_exploracion}' o número de lifters ({num_lifters}) no válido.")
+
+
 
 def GeneracionDeNodos():
 	print("")
@@ -105,12 +159,27 @@ def Init(Options):
 
     Positions = numpy.zeros((num_lifters, 3))
     CurrentNode = 0
+    
+    # Número de lifters
+    num_lifters = getattr(Options, 'lifters', 1)
+    
+    # Generar PATH global
+    PATH = generarPath(filas=19, columnas=19, tipo_exploracion=Options.TipoExploracion, num_lifters=num_lifters)
+
+    # Crear lifters con su PATH correspondiente
     for i in range(num_lifters):
-        # random X,Z inside board limits, Y fixed
-        x = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
-        z = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
-        p = numpy.asarray([x, 6, z], dtype = numpy.float64)
-        lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, CurrentNode ))
+        if Options.TipoExploracion == "Aleatorio":
+            x = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
+            z = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
+            p = numpy.asarray([x, 6, z], dtype=numpy.float64)
+            lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH))
+        else:  # Planeado
+            p = numpy.asarray([-180, 6, -180], dtype=numpy.float64)
+            if num_lifters == 1:
+                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH))
+            else:
+                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH[i]))
+
 
     # Generar basuras en posiciones aleatorias
     # CLI uses '--Basuras' (capital B) in Main.py, so support that name
@@ -247,9 +316,6 @@ def lookAt(theta):
     Settings.UP_X,
     Settings.UP_Y,
     Settings.UP_Z)	
-    
-    
-    
 
 def Simulacion(Options):
     # Variables para el control del observador
@@ -292,16 +358,11 @@ def Simulacion(Options):
         display()
         pygame.display.flip()
         pygame.time.wait(int(max(1, delta * 1000)))
-
+    
+    
     # Check termination condition: all basuras have been collected (alive == False)
     all_collected = all((not b.alive) for b in basuras)
     if all_collected:
         print("Simulacion finalizada: todas las basuras fueron recolectadas.")
-
     pygame.quit()
     return
-
-	#
-	
-
-

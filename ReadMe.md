@@ -13,7 +13,7 @@ pip install pygame PyOpenGL PyOpenGL_accelerate numpy pyyaml
 Para correr la simulación, usa el siguiente comando desde la raíz del proyecto:
 
 ```bash
-python Main.py Simulacion --lifters 10 --Basuras 10 --Delta 0.001
+python Main.py Simulacion --TipoExploracion Aleatorio --lifters 10 --Basuras 10 --Delta 0.001
 ```
 
 ## Parámetros
