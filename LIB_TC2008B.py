@@ -11,6 +11,9 @@ textures = [];
 lifters = [];
 basuras = [];
 delta = 0;
+t_relativo = 0;
+semaforo_1_status = numpy.zeros(1, dtype = numpy.int32)
+D = numpy.zeros((5,5))
 
 def generarPath(filas=19, columnas=19, tipo_exploracion="Aleatorio", num_lifters=1):
     """
@@ -172,13 +175,13 @@ def Init(Options):
             x = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
             z = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
             p = numpy.asarray([x, 6, z], dtype=numpy.float64)
-            lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH))
+            lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH, lifters))
         else:  # Planeado
             p = numpy.asarray([-180, 6, -180], dtype=numpy.float64)
             if num_lifters == 1:
-                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH))
+                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH, lifters))
             else:
-                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH[i]))
+                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH[i], lifters))
 
 
     # Generar basuras en posiciones aleatorias
@@ -317,6 +320,39 @@ def lookAt(theta):
     Settings.UP_Y,
     Settings.UP_Z)	
 
+def semaforo(Options):
+    global delta
+    global t_relativo
+    global semaforo_1_status
+    t0 = Options.t0
+    t1 = Options.t1
+    t2 = Options.t2
+
+    t_relativo += delta
+
+    if t_relativo < t0:
+        print("Luz verde")
+        semaforo_1_status = 0
+    elif t0 < t_relativo and t_relativo < (t0 + t1):
+        print("Luz amarilla")
+        semaforo_1_status = 1
+    elif t0 + t1 + t2 > t_relativo:
+        print("Luz roja")
+        semaforo_1_status = 2
+    else:
+        t_relativo = 0  
+        semaforo_1_status  
+
+def DistMatrix(Lifters):
+    global D
+    n = len(Lifters)
+    D = numpy.zeros((n, n)) 
+    for i, a in enumerate(Lifters):
+        for j, b in enumerate(Lifters):
+            D[i, j] = numpy.linalg.norm(numpy.array(a.Position) - numpy.array(b.Position))
+    print(D)
+    return D
+
 def Simulacion(Options):
     # Variables para el control del observador
     global delta
@@ -325,8 +361,17 @@ def Simulacion(Options):
     delta = Options.Delta
     Init(Options)
     running = True
+    t_act = 0
+
     while running:
         # Event handling
+        t_act += delta
+        semaforo(Options)
+        print("== POSICIONES ANTES DE CALCULAR DISTANCIA ==")
+        for i, l in enumerate(lifters):
+            print(f"Lifter {i}: {l.Position}")
+        D = DistMatrix(lifters)
+        print(D)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
