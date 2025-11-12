@@ -33,15 +33,17 @@ NodosVisita = numpy.array([
 ], dtype=numpy.float64)
 
 class Lifter:
-    def __init__(self, dim, vel, textures, idx, position, currentNode, tipo_exploracion, path, vecinos):
+    def __init__(self, dim, vel, textures, idx, position, currentNode, tipo_exploracion, path, semaforo_1_status, D_mat):
         # Limites del mapa y ID del robot
         self.dim = dim
         self.idx = idx
+        self.estado = semaforo_1_status
         self.tipo_exploracion = tipo_exploracion
+        self.D_mat = D_mat
         # Se inicializa la posicion
         self.Position = numpy.array(position, dtype=numpy.float64).flatten()
 
-        self.vecinos = vecinos
+        
         # Vector de dirección   
         self.Direction = numpy.zeros(3)
         self.angle = 0
@@ -125,6 +127,13 @@ class Lifter:
         return direction
 
     def update(self, delta):
+
+        print(self.vel)
+        print(self.estado)
+        print(self.D_mat[0])
+        print(self.idx)
+        jaja = (self.D_mat[0][self.idx,:])
+
         if self.status == "searching":
             self.Position = numpy.asarray(self.Position, dtype=numpy.float64)
             self.Position += self.Direction * self.vel
@@ -140,6 +149,9 @@ class Lifter:
             if self.Direction[2] > 0:
                 self.angle = 360 - self.angle
         
+        if self.idx == 0 and numpy.any(jaja < 20):
+            self.vel = 0
+
         mssg = "Agent:%d \t State:%s \t Node:[%0.0f,0,%0.0f] -> [%0.0f,0,%0.0f]" % (
 			self.idx,
 			self.status,
@@ -149,8 +161,8 @@ class Lifter:
 			self.nextNodePosition[2]
 		)
         #print(mssg)
-        print([v.Position for v in self.vecinos], self.Position)
-        
+        #print([v.Position for v in self.vecinos], self.Position)
+
         with open('data.csv', mode='a', newline='') as file:
             writer = csv.writer(file)
             writer.writerow([self.idx, self.status,

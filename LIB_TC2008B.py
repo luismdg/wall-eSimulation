@@ -13,7 +13,7 @@ basuras = [];
 delta = 0;
 t_relativo = 0;
 semaforo_1_status = numpy.zeros(1, dtype = numpy.int32)
-D = numpy.zeros((5,5))
+D = numpy.zeros(1, dtype = list)
 
 def generarPath(filas=19, columnas=19, tipo_exploracion="Aleatorio", num_lifters=1):
     """
@@ -153,6 +153,10 @@ def Init(Options):
     for File in glob.glob(Settings.Materials + "*.*"):
         Texturas(File)
     
+    Positions = numpy.random.rand(Options.lifters,3)*70
+    Positions[:,1] = 0
+    print(Positions)
+
     # Posiciones iniciales de los montacargas (agents) - placed randomly inside the board
     # Support both 'lifters' and possible alternative attribute names
     num_lifters = getattr(Options, 'lifters', None)
@@ -175,13 +179,13 @@ def Init(Options):
             x = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
             z = random.uniform(-Settings.DimBoard * 0.8, Settings.DimBoard * 0.8)
             p = numpy.asarray([x, 6, z], dtype=numpy.float64)
-            lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH, lifters))
+            lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH, semaforo_1_status, D))
         else:  # Planeado
             p = numpy.asarray([-180, 6, -180], dtype=numpy.float64)
             if num_lifters == 1:
-                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH, lifters))
+                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH, semaforo_1_status, D))
             else:
-                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH[i], lifters))
+                lifters.append(Lifter(Settings.DimBoard, 0.7, textures, i, p, 0, Options.TipoExploracion, PATH[i], semaforo_1_status, D))
 
 
     # Generar basuras en posiciones aleatorias
@@ -346,11 +350,12 @@ def semaforo(Options):
 def DistMatrix(Lifters):
     global D
     n = len(Lifters)
-    D = numpy.zeros((n, n)) 
+    D_mat = numpy.zeros((n, n)) 
     for i, a in enumerate(Lifters):
         for j, b in enumerate(Lifters):
-            D[i, j] = numpy.linalg.norm(numpy.array(a.Position) - numpy.array(b.Position))
-    print(D)
+            D_mat[i,j] = numpy.linalg.norm(a.Position - b.Position)
+    D[0] = D_mat
+    numpy.fill_diagonal(D_mat, numpy.inf)
     return D
 
 def Simulacion(Options):
