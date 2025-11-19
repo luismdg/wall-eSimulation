@@ -1,6 +1,7 @@
-import yaml, pygame, random, glob, math, numpy
+import yaml, pygame, random, glob, math, numpy, time
 from Lifter import Lifter
 from Basura import Basura
+from Cubo import Cubo
 
 from pygame.locals import *
 from OpenGL.GL import *
@@ -316,6 +317,354 @@ def lookAt(theta):
     Settings.UP_X,
     Settings.UP_Y,
     Settings.UP_Z)	
+
+
+class IntersectionSim:
+    """Simple text-mode 4-way intersection simulator.
+
+    - Four approaches: N, S, E, W (traffic flows both ways by pairing N/S and E/W)
+    - Two phases: NS green, then EW green. Each green lasts `TS` seconds.
+    - Arrivals per approach follow a Poisson process; one road may be heavier with probability P.
+    - `lifters` parameter is used as a scaling factor for arrival rates.
+    """
+    def __init__(self, lifters, TS, P, duration):
+        self.lifters = max(1, int(lifters))
+        self.TS = float(TS)
+        self.P = float(P)
+        self.duration = float(duration)
+        # base arrival rate (cars/sec) per approach scaled by lifters (increased for visible traffic)
+        self.base_rate = 0.2 * self.lifters
+        self.arrival = {d: self.base_rate for d in ['N','S','E','W']}
+        # With probability P, pick one road to be heavy
+        if random.random() < self.P:
+            heavy = random.choice(['N','S','E','W'])
+            self.arrival[heavy] *= 2.5
+            print(f"Via {heavy} seleccionada como alto flujo (P={self.P}) -> tasa {self.arrival[heavy]:.3f} c/s")
+        else:
+            print(f"Ninguna via marcada como alta (P={self.P})")
+
+        self.queues = {d: 0 for d in ['N','S','E','W']}
+        self.passed = {d: 0 for d in ['N','S','E','W']}
+        self.dt = 0.5
+        self.service_rate = 1.0  # cars per second when lane has green
+        self.time = 0.0
+
+    def step(self):
+        # arrivals
+        for d in ['N','S','E','W']:
+            lam = self.arrival[d]
+            arrivals = numpy.random.poisson(lam * self.dt)
+            self.queues[d] += arrivals
+
+        # determine current phase: 0 -> NS green, 1 -> EW green
+        cycle = int(self.time // self.TS) % 2 if self.TS > 0 else 0
+        if cycle == 0:
+            green = ['N','S']
+        else:
+            green = ['E','W']
+
+        cap = self.service_rate * self.dt
+        for d in green:
+            serve = min(self.queues[d], int(math.floor(cap)))
+            frac = cap - math.floor(cap)
+            if self.queues[d] - serve > 0 and random.random() < frac:
+                serve += 1
+            self.queues[d] -= serve
+            self.passed[d] += serve
+
+        self.time += self.dt
+
+    def run(self):
+        next_print = 0.0
+        while self.time < self.duration:
+            self.step()
+            if self.time >= next_print:
+                cycle = int(self.time // self.TS) % 2 if self.TS > 0 else 0
+                phase = 'NS' if cycle == 0 else 'EW'
+                print(f"[t={self.time:.1f}s] Phase={phase} Queues: N={self.queues['N']} S={self.queues['S']} E={self.queues['E']} W={self.queues['W']} | Passed: N={self.passed['N']} S={self.passed['S']} E={self.passed['E']} W={self.passed['W']}")
+                next_print += max(1.0, self.duration / 10.0)
+            # small sleep so output is readable when run from terminal
+            time.sleep(0.01)
+
+        self.total = sum(self.passed.values())
+
+    def summary(self):
+        print('\n--- Resumen Interseccion ---')
+        for k in ['N','S','E','W']:
+            print(f"Via {k}: Pasaron {self.passed[k]} autos")
+        print(f"Total autos pasaron: {self.total}")
+        print(f"Parametros: lifters={self.lifters}, TS={self.TS}, P={self.P}, duration={self.duration}")
+
+
+def Interseccion(Options):
+    """CLI entry point for the intersection simulator.
+
+    Expected Options: lifters, TS, P, duration
+    """
+    lifters = getattr(Options, 'lifters', 1)
+    TS = getattr(Options, 'TS', 10.0)
+    P = getattr(Options, 'P', 0.0)
+    duration = getattr(Options, 'duration', 60.0)
+
+    print(f"Iniciando simulacion de interseccion: lifters={lifters} TS={TS} P={P} duration={duration} visual={getattr(Options,'visual',False)}")
+    # If visual requested, run the pygame visual simulator, otherwise run text-mode
+    if getattr(Options, 'visual', False):
+        # Ensure Options has values expected by Init()
+        if not hasattr(Options, 'TipoExploracion'):
+            Options.TipoExploracion = 'Aleatorio'
+        if not hasattr(Options, 'Delta'):
+            Options.Delta = 0.05
+        if not hasattr(Options, 'theta'):
+            Options.theta = 0
+        if not hasattr(Options, 'radious'):
+            Options.radious = 30
+
+        # Run a 3D OpenGL visual using existing Lifter objects as forklifts
+        # Initialize OpenGL window and textures
+        Init(Options)
+
+        # Parameters
+        # shorten spawn distance for visibility and ensure movement is noticeable
+        spawn_dist = min(Settings.DimBoard * 0.9, 120.0)
+        stop_line = 30.0
+        dt = 0.05
+        # increase base arrival for visible traffic in demo
+        arrival = {d: 0.2 * max(1, int(lifters)) for d in ['N','S','E','W']}
+        if random.random() < P:
+            heavy = random.choice(['N','S','E','W'])
+            arrival[heavy] *= 2.5
+            print(f"Via {heavy} seleccionada como alto flujo (P={P}) -> tasa {arrival[heavy]:.3f} c/s")
+        else:
+            print(f"Ninguna via marcada como alta (P={P})")
+
+        queues = {d: [] for d in ['N','S','E','W']}  # lists of vehicles waiting (positions along approach)
+        moving = []  # list of vehicle dicts: {'lifter': Lifter, 'approach':d, 'state':..., 'pos':...}
+        passed = {d: 0 for d in ['N','S','E','W']}
+
+        # helper to create a visual lifter wrapper
+        def make_visual_lifter(idx, approach, position):
+            # create a Lifter instance for drawing but we will control its Position and angle
+            lf = Lifter(Settings.DimBoard, 0.7, textures, idx, position, 0, 'Aleatorio', [])
+            return lf
+
+        sim_time = 0.0
+        next_print = 0.0
+        service_rate = 1.0  # cars per second when green
+        visual_id = 0
+        total_created = 0
+        max_visual = max(6, int(lifters) * 4)  # cap total visual forklifts to avoid explosion
+        lane_offset = 12.0  # lateral offset so opposite directions don't overlap
+
+        running = True
+        while running and sim_time < duration:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    break
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    running = False
+                    break
+
+            # arrivals: create queued lifter objects so they visibly stop at the stop line
+            for d in ['N','S','E','W']:
+                lam = arrival[d]
+                arrivals = numpy.random.poisson(lam * dt)
+                for _ in range(arrivals):
+                    # create a queued lifter positioned at spawn_dist
+                    if d == 'N':
+                        pos = numpy.array([0.0, 6.0, -spawn_dist], dtype=numpy.float64)
+                    # Respect global cap
+                    if total_created >= max_visual:
+                        continue
+                    if d == 'N':
+                        pos = numpy.array([-lane_offset, 6.0, -spawn_dist], dtype=numpy.float64)
+                    elif d == 'S':
+                        pos = numpy.array([lane_offset, 6.0, spawn_dist], dtype=numpy.float64)
+                    elif d == 'W':
+                        pos = numpy.array([-spawn_dist, 6.0, -lane_offset], dtype=numpy.float64)
+                    else:  # E
+                        pos = numpy.array([spawn_dist, 6.0, lane_offset], dtype=numpy.float64)
+                    lfq = make_visual_lifter(visual_id, d, pos)
+                    visual_id += 1
+                    total_created += 1
+                    queues[d].append(lfq)
+            # traffic light phase
+            cycle = int(sim_time // TS) % 2 if TS > 0 else 0
+            if cycle == 0:
+                green = ['N','S']
+            else:
+                green = ['E','W']
+
+            # serve vehicles from queues when green using fractional capacity (works for dt<1)
+            expected = service_rate * dt
+            for d in green:
+                # check intersection occupancy by conflicting approaches; if occupied, delay serving
+                conflicting = ['E','W'] if d in ['N','S'] else ['N','S']
+                intersection_entry = spawn_dist - 20.0
+                occupied = any((v['progress'] >= intersection_entry and v['progress'] <= (v['total'] - intersection_entry)) for v in moving if v['approach'] in conflicting)
+                if occupied:
+                    serve = 0
+                else:
+                    serve = min(len(queues[d]), int(math.floor(expected)))
+                    frac = expected - math.floor(expected)
+                    if len(queues[d]) - serve > 0 and random.random() < frac:
+                        serve += 1
+                for i in range(serve):
+                    lfq = queues[d].pop(0)
+                    # spawn queued lifter into moving with progress=0
+                    lf = lfq
+                    moving.append({'lifter': lf, 'approach': d, 'progress': 0.0, 'total': spawn_dist * 2.0, 'state': 'crossing'})
+
+            # update moving vehicles using progress-based spacing
+            min_gap = 12.0  # minimum gap between vehicles (in same units as progress)
+            move_amount = service_rate * dt * 60.0
+            # group by approach and sort by progress descending (closest to center first)
+            by_app = {d: [] for d in ['N','S','E','W']}
+            for v in moving:
+                by_app[v['approach']].append(v)
+
+            new_moving = []
+            for d, lst in by_app.items():
+                # sort closest-first (highest progress first)
+                lst.sort(key=lambda x: x['progress'], reverse=True)
+                new_progress_vals = {}
+                prev_new = None
+                for v in lst:
+                    old_p = v['progress']
+                    # desired new progress
+                    desired = min(v['total'], old_p + move_amount)
+                    if prev_new is None:
+                        new_p = desired
+                    else:
+                        # ensure gap: this vehicle's new progress must be <= prev_new - min_gap
+                        max_allowed = prev_new - min_gap
+                        # cannot move backward: new_p >= old_p
+                        new_p = min(desired, max_allowed)
+                        if new_p < old_p:
+                            new_p = old_p
+                    prev_new = new_p
+                    new_progress_vals[id(v)] = new_p
+
+                # apply new progress and compute positions; collect survivors
+                for v in lst:
+                    new_p = new_progress_vals[id(v)]
+                    v['progress'] = new_p
+                    # compute world pos from progress
+                    # apply lateral lane offsets so opposite approaches use different lanes
+                    if v['approach'] == 'N':
+                        x = -lane_offset
+                        z = -spawn_dist + new_p
+                        v['lifter'].Position = numpy.array([x, 6.0, z], dtype=numpy.float64)
+                    elif v['approach'] == 'S':
+                        x = lane_offset
+                        z = spawn_dist - new_p
+                        v['lifter'].Position = numpy.array([x, 6.0, z], dtype=numpy.float64)
+                    elif v['approach'] == 'W':
+                        x = -spawn_dist + new_p
+                        z = -lane_offset
+                        v['lifter'].Position = numpy.array([x, 6.0, z], dtype=numpy.float64)
+                    else:  # E
+                        x = spawn_dist - new_p
+                        z = lane_offset
+                        v['lifter'].Position = numpy.array([x, 6.0, z], dtype=numpy.float64)
+
+                    # check if finished crossing
+                    if v['progress'] >= v['total']:
+                        passed[v['approach']] += 1
+                        # do not re-add
+                    else:
+                        # set angle for lifter facing direction of travel
+                        if v['approach'] in ('N','S'):
+                            ang = 180.0 if v['approach'] == 'S' else 0.0
+                        else:
+                            ang = 270.0 if v['approach'] == 'E' else 90.0
+                        v['lifter'].angle = ang
+                        new_moving.append(v)
+
+            moving = new_moving
+
+            # render scene: clear and draw ground, roads and lifters
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+            # draw simple roads as quads
+            glPushMatrix()
+            glColor3f(0.2,0.2,0.2)
+            road_w = 40.0
+            # horizontal road
+            glBegin(GL_QUADS)
+            glVertex3f(-Settings.DimBoard, 0.1, road_w/2)
+            glVertex3f(-Settings.DimBoard, 0.1, -road_w/2)
+            glVertex3f(Settings.DimBoard, 0.1, -road_w/2)
+            glVertex3f(Settings.DimBoard, 0.1, road_w/2)
+            glEnd()
+            # vertical road
+            glBegin(GL_QUADS)
+            glVertex3f(road_w/2, 0.1, -Settings.DimBoard)
+            glVertex3f(-road_w/2, 0.1, -Settings.DimBoard)
+            glVertex3f(-road_w/2, 0.1, Settings.DimBoard)
+            glVertex3f(road_w/2, 0.1, Settings.DimBoard)
+            glEnd()
+            glPopMatrix()
+
+            # draw stop lines as thin quads
+            glColor3f(1.0,1.0,1.0)
+            # north stop line (z = -stop_line)
+            glBegin(GL_QUADS)
+            glVertex3f(-20, 0.2, -stop_line)
+            glVertex3f(20, 0.2, -stop_line)
+            glVertex3f(20, 0.2, -stop_line+1)
+            glVertex3f(-20, 0.2, -stop_line+1)
+            glEnd()
+
+            # draw lifters (positions already updated in movement step)
+            for v in moving:
+                lf = v['lifter']
+                # angle already set during movement update, but ensure it's present
+                if not hasattr(lf, 'angle'):
+                    lf.angle = 0
+                lf.draw()
+
+            # draw queued lifters and position them as a queue up to the stop line
+            for d in ['N','S','W','E']:
+                q = queues[d]
+                for j, lfq in enumerate(q[:10]):
+                    # compute queued position relative to stop line
+                    offset = (j + 1) * 8.0
+                    if d == 'N':
+                        x = 0.0
+                        z = -stop_line - offset
+                    elif d == 'S':
+                        x = 0.0
+                        z = stop_line + offset
+                    elif d == 'W':
+                        x = -stop_line - offset
+                        z = 0.0
+                    else:  # E
+                        x = stop_line + offset
+                        z = 0.0
+                    lfq.Position = numpy.array([x, 6.0, z], dtype=numpy.float64)
+                    lfq.draw()
+
+            pygame.display.flip()
+            pygame.time.wait(int(max(1, dt * 1000)))
+            sim_time += dt
+
+            if sim_time >= next_print:
+                cycle = int(sim_time // TS) % 2 if TS > 0 else 0
+                phase = 'NS' if cycle == 0 else 'EW'
+                print(f"[t={sim_time:.1f}s] Phase={phase} Queues: N={len(queues['N'])} S={len(queues['S'])} E={len(queues['E'])} W={len(queues['W'])} | Passed: N={passed['N']} S={passed['S']} E={passed['E']} W={passed['W']}")
+                next_print += max(1.0, duration / 10.0)
+
+        total = sum(passed.values())
+        print('\n--- Resumen Interseccion 3D ---')
+        for k in ['N','S','E','W']:
+            print(f"Via {k}: Pasaron {passed[k]} autos")
+        print(f"Total autos pasaron: {total}")
+    else:
+        sim = IntersectionSim(lifters, TS, P, duration)
+        sim.run()
+        sim.summary()
+
 
 def Simulacion(Options):
     # Variables para el control del observador
