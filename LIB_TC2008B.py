@@ -381,7 +381,10 @@ class IntersectionSim:
             if self.time >= next_print:
                 cycle = int(self.time // self.TS) % 2 if self.TS > 0 else 0
                 phase = 'NS' if cycle == 0 else 'EW'
-                print(f"[t={self.time:.1f}s] Phase={phase} Queues: N={self.queues['N']} S={self.queues['S']} E={self.queues['E']} W={self.queues['W']} | Passed: N={self.passed['N']} S={self.passed['S']} E={self.passed['E']} W={self.passed['W']}")
+                # build per-road light states
+                lights = {d: ('GREEN' if d in (['N','S'] if cycle == 0 else ['E','W']) else 'RED') for d in ['N','S','E','W']}
+                lights_str = ' '.join([f"{d}={lights[d]}" for d in ['N','S','E','W']])
+                print(f"[t={self.time:.1f}s] Phase={phase} Lights: {lights_str} Queues: N={self.queues['N']} S={self.queues['S']} E={self.queues['E']} W={self.queues['W']} | Passed: N={self.passed['N']} S={self.passed['S']} E={self.passed['E']} W={self.passed['W']}")
                 next_print += max(1.0, self.duration / 10.0)
             # small sleep so output is readable when run from terminal
             time.sleep(0.01)
@@ -393,6 +396,11 @@ class IntersectionSim:
         for k in ['N','S','E','W']:
             print(f"Via {k}: Pasaron {self.passed[k]} autos")
         print(f"Total autos pasaron: {self.total}")
+        # print final traffic-light states at simulation end
+        cycle = int(self.time // self.TS) % 2 if self.TS > 0 else 0
+        lights = {d: ('GREEN' if d in (['N','S'] if cycle == 0 else ['E','W']) else 'RED') for d in ['N','S','E','W']}
+        lights_str = ' '.join([f"{d}={lights[d]}" for d in ['N','S','E','W']])
+        print(f"Final Lights: {lights_str}")
         print(f"Parametros: lifters={self.lifters}, TS={self.TS}, P={self.P}, duration={self.duration}")
 
 
@@ -652,7 +660,9 @@ def Interseccion(Options):
             if sim_time >= next_print:
                 cycle = int(sim_time // TS) % 2 if TS > 0 else 0
                 phase = 'NS' if cycle == 0 else 'EW'
-                print(f"[t={sim_time:.1f}s] Phase={phase} Queues: N={len(queues['N'])} S={len(queues['S'])} E={len(queues['E'])} W={len(queues['W'])} | Passed: N={passed['N']} S={passed['S']} E={passed['E']} W={passed['W']}")
+                lights = {d: ('GREEN' if d in (['N','S'] if cycle == 0 else ['E','W']) else 'RED') for d in ['N','S','E','W']}
+                lights_str = ' '.join([f"{d}={lights[d]}" for d in ['N','S','E','W']])
+                print(f"[t={sim_time:.1f}s] Phase={phase} Lights: {lights_str} Queues: N={len(queues['N'])} S={len(queues['S'])} E={len(queues['E'])} W={len(queues['W'])} | Passed: N={passed['N']} S={passed['S']} E={passed['E']} W={passed['W']}")
                 next_print += max(1.0, duration / 10.0)
 
         total = sum(passed.values())
@@ -660,6 +670,11 @@ def Interseccion(Options):
         for k in ['N','S','E','W']:
             print(f"Via {k}: Pasaron {passed[k]} autos")
         print(f"Total autos pasaron: {total}")
+        # final lights state at end of visual sim
+        final_cycle = int(sim_time // TS) % 2 if TS > 0 else 0
+        final_lights = {d: ('GREEN' if d in (['N','S'] if final_cycle == 0 else ['E','W']) else 'RED') for d in ['N','S','E','W']}
+        final_lights_str = ' '.join([f"{d}={final_lights[d]}" for d in ['N','S','E','W']])
+        print(f"Final Lights: {final_lights_str}")
     else:
         sim = IntersectionSim(lifters, TS, P, duration)
         sim.run()
